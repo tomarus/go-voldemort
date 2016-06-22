@@ -2,17 +2,18 @@ package voldemort
 
 import (
 	"bytes"
-	proto "code.google.com/p/goprotobuf/proto"
 	"encoding/binary"
 	"encoding/xml"
 	"errors"
 	"fmt"
-	vproto "github.com/matzhouse/go-voldemort-protobufs"
 	"io"
 	"log"
 	"net"
 	"sync"
 	"time"
+
+	proto "github.com/golang/protobuf/proto"
+	vproto "github.com/matzhouse/go-voldemort-protobufs"
 
 	"github.com/rcrowley/go-metrics"
 )
@@ -66,7 +67,7 @@ func Dial(raddr *net.TCPAddr, proto string, reg metrics.Registry) (c *VoldemortC
 	if err != nil {
 		return nil, err
 	}
-	
+
 	conn.SetNoDelay(true)
 
 	err = setProtocol(conn, proto)
