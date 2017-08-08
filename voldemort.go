@@ -13,10 +13,12 @@ import (
 	"time"
 
 	proto "github.com/golang/protobuf/proto"
-	vproto "github.com/matzhouse/go-voldemort-protobufs"
+	vproto "github.com/tomarus/go-voldemort-protobufs"
 
 	"github.com/rcrowley/go-metrics"
 )
+
+var routing = true
 
 // The VoldemortConn struct is used to hold all the data for the Voldemort cluster you need to query
 type VoldemortConn struct {
@@ -58,9 +60,13 @@ type Server struct {
 	State      bool
 }
 
-// Returns a VoldemortConn that can be used to talk to a Voldemort cluster
-func Dial(raddr *net.TCPAddr, proto string, reg metrics.Registry) (c *VoldemortConn, err error) {
+// SetRouting sets the routing parameter for Voldemort.
+func SetRouting(r bool) {
+	routing = r
+}
 
+// Dial returns a VoldemortConn that can be used to talk to a Voldemort cluster
+func Dial(raddr *net.TCPAddr, proto string, reg metrics.Registry) (c *VoldemortConn, err error) {
 	conn, err := net.DialTCP("tcp", nil, raddr)
 	//conn, err := net.Dial(network, address)
 
@@ -210,14 +216,12 @@ func (conn *VoldemortConn) get(store string, req *vproto.GetRequest, shouldroute
 }
 
 func (conn *VoldemortConn) put(store string, req *vproto.PutRequest) (resp *vproto.PutResponse, err error) {
-
-	Routingdecision := true
 	rt := vproto.RequestType(2)
 
 	vr := &vproto.VoldemortRequest{
 		Store:       &store,
 		Type:        &rt,
-		ShouldRoute: &Routingdecision,
+		ShouldRoute: &routing,
 	}
 
 	vr.Put = req
@@ -228,9 +232,8 @@ func (conn *VoldemortConn) put(store string, req *vproto.PutRequest) (resp *vpro
 	}
 
 	output, err := conn.Do(input)
-
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("put: %v", err)
 	}
 
 	// no record found
@@ -246,17 +249,14 @@ func (conn *VoldemortConn) put(store string, req *vproto.PutRequest) (resp *vpro
 	}
 
 	return resp, nil
-
 }
 
 func (conn *VoldemortConn) getclusterdata() (cl *Cluster, err error) {
-
 	req := &vproto.GetRequest{
 		Key: []byte("cluster.xml"),
 	}
 
 	resp, err := conn.get("metadata", req, false)
-
 	if err != nil {
 		return nil, err
 	}
@@ -269,26 +269,23 @@ func (conn *VoldemortConn) getclusterdata() (cl *Cluster, err error) {
 	cl = &Cluster{}
 
 	err = xml.Unmarshal([]byte(resp.GetVersioned()[0].GetValue()), cl)
-
 	if err != nil {
 		return nil, err
 	}
 
 	conn.cl = cl
-
 	return cl, nil
 
 }
 
 func (conn *VoldemortConn) getversion(store string, key string) (vc *vproto.VectorClock, err error) {
-
 	req := &vproto.GetRequest{
 		Key: []byte(key),
 	}
 
-	resp, err := conn.get(store, req, true)
+	resp, err := conn.get(store, req, routing)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("getversion: %v", err)
 	}
 
 	if resp == nil {
@@ -320,12 +317,10 @@ func (conn *VoldemortConn) getversion(store string, key string) (vc *vproto.Vect
 
 		return resp.Versioned[0].Version, nil
 	}
-
 }
 
 // Nice getter for a string key returning a string value
 func (conn *VoldemortConn) Get(store string, key string) (value string, err error) {
-
 	if store == "" || key == "" {
 		err = errors.New("store and key cannot be empty")
 		return "", err
@@ -337,7 +332,7 @@ func (conn *VoldemortConn) Get(store string, key string) (value string, err erro
 
 	// update a metrics registry
 	start := time.Now()
-	resp, err := conn.get(store, req, true)
+	resp, err := conn.get(store, req, routing)
 	elapsed := time.Since(start)
 
 	conn.GetMetrics.Update(elapsed)
@@ -365,9 +360,8 @@ func (conn *VoldemortConn) Put(store string, key string, value string) (b bool, 
 	}
 
 	vc, err := conn.getversion(store, key)
-
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("getversion error: %v", err)
 	}
 
 	req := &vproto.PutRequest{
@@ -379,7 +373,6 @@ func (conn *VoldemortConn) Put(store string, key string, value string) (b bool, 
 	}
 
 	resp, err := conn.put(store, req)
-
 	if err != nil {
 		return false, err
 	}
@@ -487,9 +480,6 @@ func (conn *VoldemortConn) Do(input []byte) (output []byte, err error) {
 		if int(respLen) == totalcount {
 			break
 		}
-
 	}
-
 	return buf.Bytes(), nil
-
 }
